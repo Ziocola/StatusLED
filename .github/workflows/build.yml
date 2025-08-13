@@ -72,39 +72,92 @@ jobs:
             StatusLED.app.zip
 
   windows:
-    name: Windows exe (+ optional installer)
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
+  name: Windows exe (+ optional installer)
+  runs-on: windows-latest
+  defaults:
+    run:
+      shell: bash   # <— forza bash (niente più errori di sintassi)
+  steps:
+    - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+    - name: Check repo
+        # controlla che StatusLED.py sia in root
+      run: |
+        ls -la
+        [ -f StatusLED.py ] || { echo "::error::Missing StatusLED.py in repo root"; exit 1; }
 
-      - name: Install deps
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyinstaller PyQt6 bleak
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
 
-      - name: Build .exe with PyInstaller (spec file)
-        run: |
-          if not exist statusled_windows.spec (
-            echo ::error::File statusled_windows.spec not found. Add it to the repo root.
-            exit /b 1
-          )
-          pyinstaller statusled_windows.spec
+    - name: Install deps
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller pyinstaller-hooks-contrib PyQt6 bleak bleak-winrt
 
-      # Optional: build installer with Inno Setup action (uncomment when .iss present)
-      # - name: Build Inno Setup installer
-      #   uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
-      #   with:
-      #     path: statusled_installer.iss
-      #     options: /O+
+    - name: Create default Windows .spec if missing
+      run: |
+        if [ ! -f "statusled_windows.spec" ]; then
+          python - <<'PY'
+from textwrap import dedent
+content = dedent(r"""
+# -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
+hidden_bleak = collect_submodules('bleak')
+hidden_winrt = collect_submodules('winrt')
+block_cipher = None
+a = Analysis(
+    ['StatusLED.py'],
+    pathex=['.'],
+    binaries=[],
+    datas=[],
+    hiddenimports=hidden_bleak + hidden_winrt + ['PyQt6','PyQt6.QtCore','PyQt6.QtGui','PyQt6.QtWidgets'],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    noarchive=False,
+)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=False,
+    name='StatusLED',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+    target_arch=None,
+    icon=None
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='StatusLED'
+)
+""").strip()+"\n"
+open("statusled_windows.spec","w").write(content)
+print("Created default statusled_windows.spec")
+PY
+        fi
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: StatusLED-Windows
-          path: |
-            dist\StatusLED\**
-            # If you built the installer, also upload:
-            # StatusLED_Setup.exe
+    - name: Build .exe
+      run: |
+        pyinstaller statusled_windows.spec
+        test -f "dist/StatusLED/StatusLED.exe" || { echo "::error::StatusLED.exe not found"; exit 1; }
+
+    - uses: actions/upload-artifact@v4
+      with:
+        name: StatusLED-Windows
+        path: dist/StatusLED/**
