@@ -1,4 +1,4 @@
-name: Build StatusLED (macOS & Windows)
+name: Build StatusLED (macOS only)
 
 on:
   workflow_dispatch:
@@ -27,10 +27,7 @@ jobs:
 
       - name: Build .app with PyInstaller (spec file)
         run: |
-          if [ ! -f statusled_macos.spec ]; then
-            echo "::error::File statusled_macos.spec not found. Add it to the repo root."
-            exit 1
-          fi
+          test -f statusled_macos.spec || { echo "::error::File statusled_macos.spec not found in repo root"; exit 1; }
           pyinstaller statusled_macos.spec
 
       - name: Create DMG
@@ -41,123 +38,31 @@ jobs:
         run: |
           ditto -c -k --sequesterRsrc --keepParent "dist/StatusLED.app" "StatusLED.app.zip"
 
-      # Optional signing+notarization (uncomment & set secrets)
+      # Optional signing + notarization (uncomment and set secrets)
       # - name: Import signing certs
-      #   if: ${{ secrets.APPLE_CERT_P12_BASE64 != '' && secrets.APPLE_CERT_PASSWORD != '' }}
       #   uses: apple-actions/import-codesign-certs@v3
       #   with:
       #     p12-file-base64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
       #     p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
       #
       # - name: Codesign app
-      #   if: ${{ secrets.APPLE_CERT_P12_BASE64 != '' && secrets.APPLE_CERT_PASSWORD != '' && secrets.APPLE_IDENTITY != '' }}
       #   run: |
       #     codesign --force --deep --options runtime --sign "${{ secrets.APPLE_IDENTITY }}" "dist/StatusLED.app"
       #
       # - name: Notarize app
-      #   if: ${{ secrets.APPLE_NOTARY_APPLE_ID != '' && secrets.APPLE_NOTARY_TEAM_ID != '' && secrets.APPLE_NOTARY_PASSWORD != '' }}
       #   run: |
-      #     xcrun notarytool submit "dist/StatusLED.app"       #       --apple-id "${{ secrets.APPLE_NOTARY_APPLE_ID }}"       #       --password "${{ secrets.APPLE_NOTARY_PASSWORD }}"       #       --team-id "${{ secrets.APPLE_NOTARY_TEAM_ID }}" --wait
+      #     xcrun notarytool submit "dist/StatusLED.app" \
+      #       --apple-id "${{ secrets.APPLE_NOTARY_APPLE_ID }}" \
+      #       --password "${{ secrets.APPLE_NOTARY_PASSWORD }}" \
+      #       --team-id "${{ secrets.APPLE_NOTARY_TEAM_ID }}" --wait
       #
       # - name: Staple ticket
-      #   if: ${{ secrets.APPLE_NOTARY_APPLE_ID != '' && secrets.APPLE_NOTARY_TEAM_ID != '' && secrets.APPLE_NOTARY_PASSWORD != '' }}
-      #   run: |
-      #     xcrun stapler staple "dist/StatusLED.app"
+      #   run: xcrun stapler staple "dist/StatusLED.app"
 
       - uses: actions/upload-artifact@v4
         with:
           name: StatusLED-macOS
+        # Scaricherai questi due file dagli Artifacts
           path: |
             StatusLED.dmg
             StatusLED.app.zip
-
-  windows:
-  name: Windows exe (+ optional installer)
-  runs-on: windows-latest
-  defaults:
-    run:
-      shell: bash   # <— forza bash (niente più errori di sintassi)
-  steps:
-    - uses: actions/checkout@v4
-
-    - name: Check repo
-        # controlla che StatusLED.py sia in root
-      run: |
-        ls -la
-        [ -f StatusLED.py ] || { echo "::error::Missing StatusLED.py in repo root"; exit 1; }
-
-    - uses: actions/setup-python@v5
-      with:
-        python-version: "3.11"
-
-    - name: Install deps
-      run: |
-        python -m pip install --upgrade pip
-        pip install pyinstaller pyinstaller-hooks-contrib PyQt6 bleak bleak-winrt
-
-    - name: Create default Windows .spec if missing
-      run: |
-        if [ ! -f "statusled_windows.spec" ]; then
-          python - <<'PY'
-from textwrap import dedent
-content = dedent(r"""
-# -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_submodules
-hidden_bleak = collect_submodules('bleak')
-hidden_winrt = collect_submodules('winrt')
-block_cipher = None
-a = Analysis(
-    ['StatusLED.py'],
-    pathex=['.'],
-    binaries=[],
-    datas=[],
-    hiddenimports=hidden_bleak + hidden_winrt + ['PyQt6','PyQt6.QtCore','PyQt6.QtGui','PyQt6.QtWidgets'],
-    hookspath=[],
-    hooksconfig={},
-    runtime_hooks=[],
-    excludes=[],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    noarchive=False,
-)
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-exe = EXE(
-    pyz,
-    a.scripts,
-    [],
-    exclude_binaries=False,
-    name='StatusLED',
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=True,
-    console=False,
-    disable_windowed_traceback=False,
-    target_arch=None,
-    icon=None
-)
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='StatusLED'
-)
-""").strip()+"\n"
-open("statusled_windows.spec","w").write(content)
-print("Created default statusled_windows.spec")
-PY
-        fi
-
-    - name: Build .exe
-      run: |
-        pyinstaller statusled_windows.spec
-        test -f "dist/StatusLED/StatusLED.exe" || { echo "::error::StatusLED.exe not found"; exit 1; }
-
-    - uses: actions/upload-artifact@v4
-      with:
-        name: StatusLED-Windows
-        path: dist/StatusLED/**
