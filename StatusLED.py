@@ -42,6 +42,7 @@ class StatusLEDApp(QWidget):
             QPushButton#btn1 { background: #E06C75; color: #FFFFFF; }
             QPushButton#btn2 { background: #98C379; color: #FFFFFF; }
             QPushButton#btn3 { background: #b879c3; color: #FFFFFF; }
+            QPushButton#btn0 { background: #6e6e6e; color: #FFFFFF; }
             QPlainTextEdit { background: #21252B; border: 1px solid #3E4451; border-radius: 4px; }
         """
         )
@@ -89,7 +90,8 @@ class StatusLEDApp(QWidget):
         self.btn1 = QPushButton("🔴 Busy", objectName="btn1")
         self.btn2 = QPushButton("🟢 Free", objectName="btn2")
         self.btn3 = QPushButton("🟣 D.N.D.", objectName="btn3")
-        for btn, code in ((self.btn1, '1'), (self.btn2, '2'), (self.btn3, '3')):
+        self.btn0 = QPushButton("❌ OFF", objectName="btn0")
+        for btn, code in ((self.btn1, '1'), (self.btn2, '2'), (self.btn3, '3'), (self.btn0, '0')):
             btn.setEnabled(False)
             btn.clicked.connect(lambda _, c=code: self.enqueue_send(c))
             h_cmd.addWidget(btn)
@@ -118,7 +120,7 @@ class StatusLEDApp(QWidget):
         self.log("--- Avvio scansione BLE ---")
         self.lbl_status.setText("🔍 Scansione BLE…")
         self.cmb_chars.clear(); self.cmb_chars.setEnabled(False)
-        for btn in (self.btn1, self.btn2, self.btn3): btn.setEnabled(False)
+        for btn in (self.btn1, self.btn2, self.btn3, self.btn0): btn.setEnabled(False)
         # Disconnect old client
         if self.client and getattr(self.client, 'is_connected', False):
             fut = asyncio.run_coroutine_threadsafe(self.client.disconnect(), self.loop)
@@ -157,7 +159,7 @@ class StatusLEDApp(QWidget):
                 raise RuntimeError("Nessuna char write")
             self.selected_char = self.cmb_chars.currentText()
             self.cmb_chars.setEnabled(True)
-            for btn in (self.btn1, self.btn2, self.btn3): btn.setEnabled(True)
+            for btn in (self.btn1, self.btn2, self.btn3, self.btn0): btn.setEnabled(True)
             self.log("✅ Pronto per comandi")
 
         except Exception as e:
@@ -175,6 +177,24 @@ class StatusLEDApp(QWidget):
         self.log(f"📤 Comando inviato: {cmd}")
 
 
+
+    def closeEvent(self, event):
+        # All'uscita prova a spegnere il LED e disconnettere, senza cambiare la UI o i flussi
+        try:
+            if self.client and getattr(self.client, 'is_connected', False):
+                try:
+                    if getattr(self, 'selected_char', None):
+                        asyncio.run_coroutine_threadsafe(
+                            self.client.write_gatt_char(self.selected_char, b'0', response=True), self.loop
+                        ).result(0.8)
+                except Exception:
+                    pass
+                try:
+                    asyncio.run_coroutine_threadsafe(self.client.disconnect(), self.loop).result(1)
+                except Exception:
+                    pass
+        finally:
+            return super().closeEvent(event)
 def main():
     loop = asyncio.new_event_loop()
     threading.Thread(target=loop.run_forever, daemon=True).start()
