@@ -39,7 +39,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=None  # opzionale, se presente
+    icon='StatusLED.icns'  # opzionale, se presente
 )
 
 coll = COLLECT(
