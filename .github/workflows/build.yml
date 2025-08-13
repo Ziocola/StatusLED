@@ -1,0 +1,213 @@
+name: Build StatusLED (macOS & Windows)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: macOS app & DMG
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show repo
+        run: |
+          pwd
+          ls -la
+          if [ ! -f "StatusLED.py" ]; then
+            echo "::error::Missing StatusLED.py in repo root"; exit 1; fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pyinstaller-hooks-contrib PyQt6 bleak
+
+      - name: Create default macOS .spec if missing
+        run: |
+          if [ ! -f "statusled_macos.spec" ]; then
+            python - <<'PY'
+from textwrap import dedent
+content = dedent(r"""
+# -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_submodules
+hidden_bleak = collect_submodules('bleak')
+block_cipher = None
+a = Analysis(
+    ['StatusLED.py'],
+    pathex=['.'],
+    binaries=[],
+    datas=[],
+    hiddenimports=hidden_bleak + ['PyQt6','PyQt6.QtCore','PyQt6.QtGui','PyQt6.QtWidgets'],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    noarchive=False,
+)
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name='StatusLED',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=None
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='StatusLED'
+)
+app = BUNDLE(
+    coll,
+    name='StatusLED.app',
+    icon=None,
+    bundle_identifier='org.acolasanto.StatusLED',
+    info_plist={
+        'CFBundleName': 'StatusLED',
+        'CFBundleDisplayName': 'StatusLED',
+        'CFBundleIdentifier': 'org.acolasanto.StatusLED',
+        'CFBundleVersion': '1.0.0',
+        'CFBundleShortVersionString': '1.0.0',
+        'LSApplicationCategoryType': 'public.app-category.utilities',
+        'NSBluetoothAlwaysUsageDescription': 'StatusLED usa il Bluetooth per leggere e impostare lo stato del LED.',
+    }
+)
+""").strip()+"\n"
+open("statusled_macos.spec","w").write(content)
+print("Created default statusled_macos.spec")
+PY
+          fi
+
+      - name: Build .app with PyInstaller
+        run: |
+          pyinstaller statusled_macos.spec || { echo "::error::PyInstaller failed"; exit 1; }
+          ls -la dist || true
+          test -d "dist/StatusLED.app" || { echo "::error::StatusLED.app not found after build"; exit 1; }
+
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "StatusLED" -srcfolder "dist/StatusLED.app" -ov -format UDZO "StatusLED.dmg"
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: StatusLED-macOS
+          path: |
+            StatusLED.dmg
+            dist/StatusLED.app
+
+  windows:
+    name: Windows exe (+ optional installer)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show repo
+        shell: bash
+        run: |
+          pwd
+          ls -la
+          if [ ! -f "StatusLED.py" ]; then
+            echo "::error::Missing StatusLED.py in repo root"; exit 1; fi
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller pyinstaller-hooks-contrib PyQt6 bleak bleak-winrt
+
+      - name: Create default Windows .spec if missing
+        shell: python
+        run: |
+          from textwrap import dedent
+          import os
+          if not os.path.exists("statusled_windows.spec"):
+              content = dedent(r"""
+              # -*- mode: python ; coding: utf-8 -*-
+              from PyInstaller.utils.hooks import collect_submodules
+              hidden_bleak = collect_submodules('bleak')
+              hidden_winrt = collect_submodules('winrt')
+              block_cipher = None
+              a = Analysis(
+                  ['StatusLED.py'],
+                  pathex=['.'],
+                  binaries=[],
+                  datas=[],
+                  hiddenimports=hidden_bleak + hidden_winrt + ['PyQt6','PyQt6.QtCore','PyQt6.QtGui','PyQt6.QtWidgets'],
+                  hookspath=[],
+                  hooksconfig={},
+                  runtime_hooks=[],
+                  excludes=[],
+                  win_no_prefer_redirects=False,
+                  win_private_assemblies=False,
+                  noarchive=False,
+              )
+              pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+              exe = EXE(
+                  pyz,
+                  a.scripts,
+                  [],
+                  exclude_binaries=False,
+                  name='StatusLED',
+                  debug=False,
+                  bootloader_ignore_signals=False,
+                  strip=False,
+                  upx=True,
+                  console=False,
+                  disable_windowed_traceback=False,
+                  target_arch=None,
+                  icon=None
+              )
+              coll = COLLECT(
+                  exe,
+                  a.binaries,
+                  a.zipfiles,
+                  a.datas,
+                  strip=False,
+                  upx=True,
+                  upx_exclude=[],
+                  name='StatusLED'
+              )
+              """).strip()+"\n"
+              open("statusled_windows.spec","w").write(content)
+              print("Created default statusled_windows.spec")
+
+      - name: Build .exe with PyInstaller
+        run: |
+          pyinstaller statusled_windows.spec
+          dir dist\\StatusLED || ver > nul
+          if not exist dist\\StatusLED\\StatusLED.exe ( echo ::error::StatusLED.exe not found & exit /b 1 )
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: StatusLED-Windows
+          path: dist\\StatusLED\\**
